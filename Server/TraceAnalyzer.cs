@@ -3,10 +3,27 @@ using Microsoft.Diagnostics.Tracing.Analysis;
 using Microsoft.Diagnostics.Tracing.Stacks;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
-namespace PVAnalyze;
+namespace PVAnalyze.Server;
 
 public static class TraceAnalyzer
 {
+    public static TraceInfo GetTraceInfo(TraceSession session)
+    {
+        var traceLog = session.TraceLog;
+        var processes = traceLog.Processes
+            .Where(p => p.CPUMSec > 0 || p.Name != "Unknown")
+            .OrderByDescending(p => p.CPUMSec)
+            .Select(p => new ProcessInfo(p.ProcessID, p.Name, Math.Round(p.CPUMSec, 1)))
+            .ToList();
+
+        return new TraceInfo(
+            session.Id,
+            session.FilePath,
+            Math.Round(traceLog.SessionDuration.TotalMilliseconds, 1),
+            traceLog.EventCount,
+            processes);
+    }
+
     public static GcStatsResponse GetGcStats(Etlx.TraceLog traceLog, string? processFilter,
         bool timeline, int? longest, double? fromMs, double? toMs)
     {

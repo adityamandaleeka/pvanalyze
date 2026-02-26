@@ -1,7 +1,7 @@
 using System.CommandLine;
 using System.Text.Json;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
-using PVAnalyze;
+using PVAnalyze.Server;
 
 namespace PVAnalyze.Commands;
 

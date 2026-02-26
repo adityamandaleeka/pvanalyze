@@ -2,7 +2,7 @@ using System.CommandLine;
 using System.Text.Json;
 using Microsoft.Diagnostics.Tracing.Stacks;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
-using PVAnalyze;
+using PVAnalyze.Server;
 
 namespace PVAnalyze.Commands;
 

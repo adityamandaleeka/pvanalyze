@@ -19,6 +19,7 @@ class Program
             AllocCommand.Create(),
             TimelineCommand.Create(),
             SnapshotCommand.Create(),
+            ServeCommand.Create(),
         };
 
         return await rootCommand.InvokeAsync(args);

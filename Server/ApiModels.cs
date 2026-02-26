@@ -1,4 +1,4 @@
-namespace PVAnalyze;
+namespace PVAnalyze.Server;
 
 // Trace info
 public record TraceInfo(string Id, string FilePath, double DurationMSec, long EventCount, List<ProcessInfo> Processes);
