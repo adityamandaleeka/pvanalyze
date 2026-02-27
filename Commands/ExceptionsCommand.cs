@@ -42,7 +42,7 @@ public static class ExceptionsCommand
 
         try
         {
-            string etlxPath = Etlx.TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
@@ -92,9 +92,6 @@ public static class ExceptionsCommand
             {
                 Console.Error.WriteLine("No exceptions found in trace.");
                 Console.Error.WriteLine("Ensure the trace was collected with exception events enabled.");
-                
-                // Clean up
-                try { File.Delete(etlxPath); } catch { }
                 return;
             }
 
@@ -129,8 +126,6 @@ public static class ExceptionsCommand
                 }
             }
 
-            // Clean up
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {

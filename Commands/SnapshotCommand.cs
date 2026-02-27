@@ -33,7 +33,7 @@ public static class SnapshotCommand
 
         try
         {
-            string etlxPath = Etlx.TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             var result = TraceAnalyzer.GetSnapshot(traceLog, at, window);
@@ -73,7 +73,6 @@ public static class SnapshotCommand
                     Console.WriteLine($"  Events: {result.Events.TotalCount} total");
             }
 
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {

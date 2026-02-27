@@ -57,7 +57,7 @@ public static class CallTreeCommand
 
         try
         {
-            string etlxPath = Etlx.TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             // Build stack source with optional time filter
@@ -94,7 +94,6 @@ public static class CallTreeCommand
                 OutputCallTree(callTree, depth, format, minPercent);
             }
 
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {

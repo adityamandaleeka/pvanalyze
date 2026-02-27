@@ -34,7 +34,7 @@ public static class JitStatsCommand
 
         try
         {
-            string etlxPath = Etlx.TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
@@ -96,8 +96,6 @@ public static class JitStatsCommand
                     break;
             }
 
-            // Clean up
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {

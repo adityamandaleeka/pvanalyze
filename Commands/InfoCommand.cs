@@ -32,8 +32,7 @@ public static class InfoCommand
 
         try
         {
-            // Convert EventPipe trace to TraceLog format for analysis
-            string etlxPath = TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             
             using var traceLog = new TraceLog(etlxPath);
             
@@ -56,8 +55,6 @@ public static class InfoCommand
                 }
             }
 
-            // Clean up temporary etlx file
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {

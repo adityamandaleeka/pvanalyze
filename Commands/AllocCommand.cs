@@ -39,18 +39,10 @@ public static class AllocCommand
             return;
         }
 
-        string etlxPath = Path.ChangeExtension(traceFile.FullName, ".etlx");
-        bool createdEtlx = false;
-
         try
         {
-            if (!File.Exists(etlxPath))
-            {
-                EtlxTraceLog.CreateFromEventPipeDataFile(traceFile.FullName, etlxPath);
-                createdEtlx = true;
-            }
-
-            using var traceLog = EtlxTraceLog.OpenOrConvert(etlxPath);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            using var traceLog = new EtlxTraceLog(etlxPath);
             
             var allocations = new Dictionary<string, AllocationInfo>();
             long totalBytes = 0;
@@ -157,12 +149,9 @@ public static class AllocCommand
                 OutputText(allocations, totalBytes, totalCount, top, groupBy);
             }
         }
-        finally
+        catch (Exception ex)
         {
-            if (createdEtlx && File.Exists(etlxPath))
-            {
-                try { File.Delete(etlxPath); } catch { }
-            }
+            Console.Error.WriteLine($"Error analyzing trace: {ex.Message}");
         }
     }
 

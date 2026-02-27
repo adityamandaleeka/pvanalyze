@@ -36,7 +36,7 @@ public static class TimelineCommand
 
         try
         {
-            string etlxPath = Etlx.TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             var laneSet = new HashSet<string>(
@@ -64,7 +64,6 @@ public static class TimelineCommand
                 }
             }
 
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {

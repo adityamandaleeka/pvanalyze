@@ -44,7 +44,7 @@ public static class GcStatsCommand
 
         try
         {
-            string etlxPath = Etlx.TraceLog.CreateFromEventPipeDataFile(traceFile.FullName);
+            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
@@ -130,7 +130,6 @@ public static class GcStatsCommand
             {
                 Console.Error.WriteLine("No .NET processes with GC data found in trace.");
                 Console.Error.WriteLine("Ensure the trace was collected with GC events enabled.");
-                try { File.Delete(etlxPath); } catch { }
                 return;
             }
 
@@ -143,9 +142,6 @@ public static class GcStatsCommand
             {
                 OutputSummary(processStats, format);
             }
-
-            // Clean up
-            try { File.Delete(etlxPath); } catch { }
         }
         catch (Exception ex)
         {
