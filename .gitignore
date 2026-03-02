@@ -2,4 +2,6 @@ bin/
 obj/
 .vs/
 *.user
+*.nupkg
+nupkg/
 
