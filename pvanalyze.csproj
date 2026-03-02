@@ -16,7 +16,6 @@
     <PackageId>pvanalyze</PackageId>
     <VersionPrefix>0.1.0</VersionPrefix>
     <Description>Cross-platform command-line tool for analyzing .NET performance traces (.nettrace files)</Description>
-    <Authors>Microsoft</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/adityamandaleeka/pvanalyze</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adityamandaleeka/pvanalyze</RepositoryUrl>

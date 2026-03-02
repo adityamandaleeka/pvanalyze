@@ -14,8 +14,16 @@ A cross-platform command-line tool for analyzing .NET performance traces (`.nett
 ## Installation
 
 ```bash
-# Build from source
-cd src/pvanalyze
+# Run without installing (.NET 10+)
+dnx pvanalyze
+
+# Or install as a global tool
+dotnet tool install --global pvanalyze
+```
+
+### Build from source
+
+```bash
 dotnet build -c Release
 
 # Or publish as a self-contained executable
