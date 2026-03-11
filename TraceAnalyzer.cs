@@ -79,6 +79,92 @@ public static class TraceAnalyzer
         return new GcStatsResponse(processStats, timelineEvents);
     }
 
+    public static List<DatasResponse> GetDatasStats(Etlx.TraceLog traceLog, string? processFilter)
+    {
+        using var source = traceLog.Events.GetSource();
+        TraceLoadedDotNetRuntimeExtensions.NeedLoadedDotNetRuntimes(source);
+        source.Process();
+
+        var results = new List<DatasResponse>();
+
+        foreach (var process in TraceProcessesExtensions.Processes(source))
+        {
+            var runtime = TraceLoadedDotNetRuntimeExtensions.LoadedDotNetRuntime(process);
+            if (runtime == null) continue;
+
+            if (processFilter != null &&
+                !process.Name.Contains(processFilter, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var tuningEvents = new List<DatasTuningEvent>();
+            var sampleEvents = new List<DatasSampleEvent>();
+            var fullGCTuningEvents = new List<DatasFullGCTuningEvent>();
+
+            foreach (var gc in runtime.GC.GCs)
+            {
+                foreach (var dynEvent in gc.DynamicEvents)
+                {
+                    switch (dynEvent.Name)
+                    {
+                        case DatasParser.TuningEventName:
+                            var tuning = DatasParser.ParseTuning(dynEvent.Payload, dynEvent.TimeStamp);
+                            if (tuning != null) tuningEvents.Add(tuning);
+                            break;
+                        case DatasParser.SampleEventName:
+                            var sample = DatasParser.ParseSample(dynEvent.Payload, dynEvent.TimeStamp);
+                            if (sample != null) sampleEvents.Add(sample);
+                            break;
+                        case DatasParser.FullGCTuningEventName:
+                            var fullGC = DatasParser.ParseFullGCTuning(dynEvent.Payload, dynEvent.TimeStamp);
+                            if (fullGC != null) fullGCTuningEvents.Add(fullGC);
+                            break;
+                    }
+                }
+            }
+
+            if (tuningEvents.Count == 0 && sampleEvents.Count == 0 && fullGCTuningEvents.Count == 0)
+                continue;
+
+            // Compute overview
+            DatasOverview? overview = null;
+            if (tuningEvents.Count > 0 || sampleEvents.Count > 0)
+            {
+                int heapCountChanges = 0;
+                int prevHc = -1;
+                int minHc = int.MaxValue, maxHc = int.MinValue;
+                foreach (var t in tuningEvents)
+                {
+                    if (prevHc != -1 && t.NewHeapCount != prevHc) heapCountChanges++;
+                    prevHc = t.NewHeapCount;
+                    minHc = Math.Min(minHc, t.NewHeapCount);
+                    maxHc = Math.Max(maxHc, t.NewHeapCount);
+                }
+
+                overview = new DatasOverview(
+                    TuningEventCount: tuningEvents.Count,
+                    SampleCount: sampleEvents.Count,
+                    FullGCTuningCount: fullGCTuningEvents.Count,
+                    MinHeapCount: tuningEvents.Count > 0 ? minHc : 0,
+                    MaxHeapCount: tuningEvents.Count > 0 ? maxHc : 0,
+                    HeapCountChanges: heapCountChanges,
+                    MeanThroughputCostPercent: tuningEvents.Count > 0
+                        ? Math.Round(tuningEvents.Average(t => t.MedianThroughputCostPercent), 3) : 0,
+                    MaxThroughputCostPercent: tuningEvents.Count > 0
+                        ? Math.Round(tuningEvents.Max(t => t.MedianThroughputCostPercent), 3) : 0,
+                    MeanGen0BudgetMB: sampleEvents.Count > 0
+                        ? Math.Round(sampleEvents.Average(s => s.Gen0BudgetPerHeap / 1_000_000.0), 3) : 0,
+                    MeanSohStableSizeMB: sampleEvents.Count > 0
+                        ? Math.Round(sampleEvents.Average(s => s.TotalSohStableSize / 1_000_000.0), 3) : 0);
+            }
+
+            results.Add(new DatasResponse(
+                process.ProcessID, process.Name,
+                tuningEvents, sampleEvents, fullGCTuningEvents, overview));
+        }
+
+        return results;
+    }
+
     public static JitStatsResponse GetJitStats(Etlx.TraceLog traceLog, string? processFilter)
     {
         using var source = traceLog.Events.GetSource();
