@@ -64,6 +64,13 @@ pvanalyze gcstats trace.nettrace --longest 5   # Top 5 longest pauses
 # GC with time filtering
 pvanalyze gcstats trace.nettrace --from 1000 --to 2000 --timeline
 
+# DATAS (Dynamic Adaptation) — heap count tuning decisions
+pvanalyze datas trace.nettrace                    # overview + tuning timeline
+pvanalyze datas trace.nettrace --changes-only     # only heap count transitions
+pvanalyze datas trace.nettrace --samples           # per-GC budget/TCP/MSL samples
+pvanalyze datas trace.nettrace --gen2              # gen2 backstop tuning
+pvanalyze datas trace.nettrace --changes-only --format json
+
 # JIT compilation statistics
 pvanalyze jitstats trace.nettrace
 pvanalyze jitstats trace.nettrace --format json
@@ -174,6 +181,38 @@ Options:
 - `--top <N>` - Number of types to show
 - `--group-by type|namespace|module` - Aggregation level
 - `--from <ms>` / `--to <ms>` - Time range filter
+
+### `datas <trace-file>`
+
+Analyze DATAS (Dynamic Adaptation To Application Sizes) tuning decisions. DATAS dynamically adjusts heap count and gen0 budget on server GC. Requires .NET 9+ with `DOTNET_GCDynamicAdaptationMode=1` and GC events collected at verbose level.
+
+**Trace collection:**
+```bash
+dotnet-trace collect -p <PID> --providers "Microsoft-Windows-DotNETRuntime:0x4C14FCCBD:5"
+```
+
+Options:
+- `--samples` - Show per-GC samples (budget, TCP, MSL wait times)
+- `--tuning` - Show heap count tuning decisions
+- `--gen2` - Show gen2 full GC backstop tuning
+- `--changes-only` - Only show events where heap count changed (and ±3 GC window for samples)
+- `--format text|json` - Output format
+- `--process <name>` - Filter by process
+
+Examples:
+```bash
+# Quick overview: heap count range, changes, mean TCP
+pvanalyze datas trace.nettrace
+
+# Just the transitions — ideal for agents
+pvanalyze datas trace.nettrace --changes-only
+
+# Full detail around heap count changes
+pvanalyze datas trace.nettrace --samples --changes-only
+
+# Everything as JSON
+pvanalyze datas trace.nettrace --format json
+```
 
 ### `events <trace-file>`
 
