@@ -57,6 +57,77 @@ public record AllocBucket(long Count, long TotalBytes);
 public record JitBucket(int MethodCount, double TotalMs);
 public record EventBucket(int Count);
 
+// DATAS (Dynamic Adaptation To Application Sizes)
+public record DatasResponse(
+    int ProcessId, string ProcessName,
+    List<DatasTuningEvent> TuningEvents,
+    List<DatasSampleEvent> SampleEvents,
+    List<DatasFullGCTuningEvent> FullGCTuningEvents,
+    DatasOverview? Overview);
+
+public record DatasOverview(
+    int TuningEventCount, int SampleCount, int FullGCTuningCount,
+    int MinHeapCount, int MaxHeapCount, int HeapCountChanges,
+    double MeanThroughputCostPercent, double MaxThroughputCostPercent,
+    double MeanGen0BudgetMB, double MeanSohStableSizeMB);
+
+public class DatasTuningEvent
+{
+    public DateTime TimeStamp { get; set; }
+    public int Version { get; set; }
+    public int NewHeapCount { get; set; }
+    public int MaxHeapCount { get; set; }
+    public int MinHeapCount { get; set; }
+    public long GcIndex { get; set; }
+    public long TotalSohStableSize { get; set; }
+    public float MedianThroughputCostPercent { get; set; }
+    public float TcpToConsider { get; set; }
+    public float CurrentAccumulation { get; set; }
+    public int RecordedTcpCount { get; set; }
+    public float RecordedTcpSlope { get; set; }
+    public uint NumGcsSinceLastChange { get; set; }
+    public int AggFactor { get; set; }
+    public int ChangeDecision { get; set; }
+    public int AdjReason { get; set; }
+    public int HcChangeFreqFactor { get; set; }
+    public int HcFreqReason { get; set; }
+    public int AdjMetric { get; set; }
+}
+
+public class DatasSampleEvent
+{
+    public DateTime TimeStamp { get; set; }
+    public int Version { get; set; }
+    public long GcIndex { get; set; }
+    public uint ElapsedBetweenGcsUs { get; set; }
+    public uint GcPauseTimeUs { get; set; }
+    public uint SohMslWaitTimeUs { get; set; }
+    public uint UohMslWaitTimeUs { get; set; }
+    public long TotalSohStableSize { get; set; }
+    public uint Gen0BudgetPerHeap { get; set; }
+
+    /// <summary>Throughput cost: pause / (pause + elapsed), as percentage.</summary>
+    public double ThroughputCostPercent =>
+        (ElapsedBetweenGcsUs + GcPauseTimeUs) == 0 ? 0 :
+        GcPauseTimeUs * 100.0 / (ElapsedBetweenGcsUs + GcPauseTimeUs);
+}
+
+public class DatasFullGCTuningEvent
+{
+    public DateTime TimeStamp { get; set; }
+    public int Version { get; set; }
+    public int NewHeapCount { get; set; }
+    public long GcIndex { get; set; }
+    public float MedianGen2Tcp { get; set; }
+    public uint NumGen2sSinceLastChange { get; set; }
+    public uint Gen2Sample0Age { get; set; }
+    public float Gen2Sample0Percent { get; set; }
+    public uint Gen2Sample1Age { get; set; }
+    public float Gen2Sample1Percent { get; set; }
+    public uint Gen2Sample2Age { get; set; }
+    public float Gen2Sample2Percent { get; set; }
+}
+
 // Point-in-time snapshot
 public record SnapshotResponse(double At, double WindowFrom, double WindowTo, SnapshotGc? Gc, SnapshotCpu? Cpu,
     SnapshotExceptions? Exceptions, SnapshotEvents? Events);
