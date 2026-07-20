@@ -1,12 +1,14 @@
 # pvanalyze
 
-A cross-platform command-line tool for analyzing .NET performance traces (`.nettrace` files).
+A cross-platform command-line tool for collecting and analyzing .NET performance
+traces. It collects and analyzes EventPipe (`.nettrace`) traces natively.
 
 > Point your coding agent at this repo and let it work. There's intentionally no `SKILL.md` or `AGENTS.md` — `--help` and this README are enough context for today's frontier models, based on my experience.
 
 ## Overview
 
-`pvanalyze` is a companion tool to PerfView that runs on **Mac, Linux, and Windows**. It provides command-line access to trace analysis capabilities, making it ideal for:
+`pvanalyze` runs on **macOS, Linux, and Windows**. Native EventPipe collection
+and trace analysis are cross-platform. The CLI is ideal for:
 
 - Automation and scripting
 - CI/CD pipelines
@@ -35,7 +37,51 @@ dotnet publish -c Release -r osx-arm64 --self-contained
 
 ### Collect a Trace
 
-Use `dotnet-trace` to collect traces on any platform:
+#### Native EventPipe collection
+
+Use `pvanalyze collect` to attach to a process:
+
+```bash
+# Collect 30 seconds of sampled CPU stacks
+pvanalyze collect --process-id <PID> --profile cpu \
+  --duration-seconds 30 --output trace.nettrace
+
+# Collect allocation and GC events
+pvanalyze collect --process-id <PID> --profile gc-verbose \
+  --duration-seconds 30 --output allocations.nettrace
+```
+
+It can also launch the target process. Use `--delay-seconds` to exclude a known
+startup or warmup period:
+
+```bash
+pvanalyze collect --profile cpu --duration-seconds 30 \
+  --delay-seconds 5 --output trace.nettrace -- dotnet myapp.dll
+```
+
+Use `--profile none` with one or more explicit provider specifications when a
+built-in profile is not appropriate:
+
+```bash
+pvanalyze collect --process-id <PID> --profile none \
+  --providers "Microsoft-Windows-DotNETRuntime:0x4C14FCCBD:5" \
+  --duration-seconds 30 --output runtime.nettrace
+```
+
+Provider specifications use
+`Name:Keywords:Level[:key=value,key=value]`; separate multiple providers with
+semicolons. Provider arguments are passed unchanged to `EventPipeProvider`.
+For example:
+
+```bash
+pvanalyze collect --process-id <PID> --profile none \
+  --providers "Microsoft-Orleans-RpcLatency:0x3:5:SampleRate=64" \
+  --duration-seconds 30 --output rpc.nettrace
+```
+
+#### dotnet-trace
+
+`dotnet-trace` remains an alternative collector on any platform:
 
 ```bash
 # Install dotnet-trace (one-time)
@@ -302,6 +348,6 @@ pvanalyze events trace.nettrace --from 500 --to 1000 --type GC
 
 ## Related Tools
 
-- [dotnet-trace](https://docs.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-trace) - Cross-platform trace collection
+- [dotnet-trace](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace) - Alternative EventPipe trace collector
 - [PerfView](https://github.com/microsoft/perfview) - Full-featured Windows GUI for trace analysis
 - [SpeedScope](https://www.speedscope.app/) - Interactive flame graph visualization

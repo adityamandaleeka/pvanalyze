@@ -17,7 +17,7 @@
     <PackageId>pvanalyze</PackageId>
     <VersionPrefix>0.1.0</VersionPrefix>
     <Authors>Aditya Mandaleeka</Authors>
-    <Description>Cross-platform command-line tool for analyzing .NET performance traces (.nettrace files)</Description>
+    <Description>Cross-platform command-line tool for collecting and analyzing .NET performance traces</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/adityamandaleeka/pvanalyze</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adityamandaleeka/pvanalyze</RepositoryUrl>
@@ -30,6 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.661903" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.28" />
     <PackageReference Include="System.CommandLine" Version="2.0.9" />
   </ItemGroup>

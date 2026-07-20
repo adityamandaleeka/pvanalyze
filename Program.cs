@@ -11,6 +11,7 @@ class Program
     {
         var rootCommand = new RootCommand("pvanalyze - Cross-platform .NET trace analyzer")
         {
+            CollectCommand.Create(),
             InfoCommand.Create(),
             GcStatsCommand.Create(),
             JitStatsCommand.Create(),
