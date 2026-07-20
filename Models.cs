@@ -57,6 +57,132 @@ public record AllocBucket(long Count, long TotalBytes);
 public record JitBucket(int MethodCount, double TotalMs);
 public record EventBucket(int Count);
 
+// Orleans RPC phase timing
+public readonly record struct RpcSiloIdentity(int Port, int Generation)
+{
+    public override string ToString() => $"{Port}:{Generation}";
+}
+
+public record RpcProcessIdentity(
+    int ProcessId,
+    string ProcessName,
+    List<string> Roles,
+    List<RpcSiloIdentity> Silos);
+
+public record RpcTraceWindow(double FromMs, double ToMs, string Source);
+
+public record RpcProviderMetadata(
+    string Name,
+    long EventCount,
+    List<int> EffectiveSampleRates,
+    Dictionary<string, string> Arguments,
+    long LostEvents,
+    long ExactCallCount,
+    long DeterministicSampleCallCount);
+
+public record DistributionStats(
+    long Count,
+    double MeanUs,
+    double P50Us,
+    double P90Us,
+    double P99Us,
+    double P999Us,
+    double MaxUs,
+    double StandardDeviationUs,
+    double MedianAbsoluteDeviationUs);
+
+public record RpcPhaseDiagnostics(
+    long MissingStart,
+    long MissingStop,
+    long Duplicate,
+    long OutOfOrder,
+    long Retry,
+    long Forwarded,
+    long CrossProcess);
+
+public record RpcPhaseProfileEntry(
+    string Name,
+    DistributionStats Duration,
+    long EligibleCalls,
+    double Completeness,
+    RpcPhaseDiagnostics Diagnostics,
+    double? SampledCpuMs = null);
+
+public record QueueGroupEntry(int Value, long Count, DistributionStats Wait);
+
+public record QueueProfileEntry(
+    string Name,
+    string ResourceKind,
+    long Arrivals,
+    long CompletedWaits,
+    DistributionStats Wait,
+    double? MeanDepth,
+    int? MaxDepth,
+    bool ContextualDepth,
+    List<QueueGroupEntry> WaitByDepth,
+    List<QueueGroupEntry> WaitByBatchSize,
+    List<QueueGroupEntry> WaitByBatchIndex,
+    double MeanFractionOfEndToEnd,
+    double WaitEndToEndCorrelation,
+    double SampledArrivalRatePerSecond,
+    double InferredMeanQueueLength,
+    long MissingEnqueue,
+    long MissingDequeue,
+    long ResourceCollisions,
+    string? PrecedingPhase,
+    string? FollowingPhase);
+
+public record RpcCallSummary(
+    string TraceId,
+    long CorrelationId,
+    RpcSiloIdentity OriginSilo,
+    bool Complete,
+    bool Successful,
+    bool WindowTruncated,
+    double Completeness,
+    int RetryCount,
+    int ForwardCount,
+    double? EndToEndUs,
+    double QueueTimeUs,
+    List<string> Warnings);
+
+public record RpcTimelineEntry(
+    double TimestampMs,
+    double CumulativeUs,
+    double DeltaUs,
+    int ProcessId,
+    string ProcessName,
+    string ProcessRole,
+    int ThreadId,
+    int ProcessorNumber,
+    RpcSiloIdentity LocalSilo,
+    string Direction,
+    string Phase,
+    string ResourceKind,
+    long ResourceId,
+    int? QueueDepth,
+    int RetryCount,
+    int ForwardCount,
+    int? BatchSize,
+    int? BatchIndex,
+    double? OperationDurationUs);
+
+public record RpcLatencyResponse(
+    RpcTraceWindow Window,
+    List<RpcProcessIdentity> Processes,
+    RpcProviderMetadata Provider,
+    long SampledCallCount,
+    long EstimatedSourceCallCount,
+    int? SamplingRate,
+    double Completeness,
+    string PercentileMethod,
+    List<RpcPhaseProfileEntry> Phases,
+    List<QueueProfileEntry> Queues,
+    DistributionStats PerCallQueueTime,
+    List<RpcCallSummary> Calls,
+    List<RpcTimelineEntry>? Timeline,
+    List<string> Warnings);
+
 // DATAS (Dynamic Adaptation To Application Sizes)
 public record DatasResponse(
     int ProcessId, string ProcessName,

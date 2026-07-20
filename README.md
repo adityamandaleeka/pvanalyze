@@ -95,6 +95,11 @@ pvanalyze events trace.nettrace --provider DotNETRuntime --limit 50
 pvanalyze events trace.nettrace --pid 1234
 pvanalyze events trace.nettrace --payload "ConnectionReset"
 
+# Reconstruct Orleans RPC latency phases and queues
+pvanalyze phases rpc.nettrace --measurement-window --queues
+pvanalyze latency rpc.nettrace --trace-id 4bf92f3577b34da6a3ce929d0e0e4736 --timeline
+pvanalyze phases rpc.nettrace --origin-silo 11111:123456 --queue activation --format json
+
 # Time-filtered events
 pvanalyze events trace.nettrace --from 1000 --to 2000
 
@@ -182,6 +187,39 @@ Options:
 - `--top <N>` - Number of types to show
 - `--group-by type|namespace|module` - Aggregation level
 - `--from <ms>` / `--to <ms>` - Time range filter
+
+### `phases|latency <trace-file>`
+
+Reconstruct calls emitted by `Microsoft-Orleans-RpcLatency/Phase` in one pass,
+keyed by exact trace ID (when present), origin silo, and correlation ID.
+Durations come from phase markers rather than sampled stacks. The report
+includes phase percentiles, standard deviation, median absolute deviation,
+completeness and ordering diagnostics, sampling metadata, and optional queue
+residency/depth analysis.
+
+```bash
+# EventPipe capture and analysis
+dotnet-trace collect \
+  --providers "Microsoft-Orleans-RpcLatency:0x3:5:SampleRate=64" \
+  --output rpc.nettrace -- dotnet Benchmarks.dll
+pvanalyze phases rpc.nettrace --measurement-window --queues
+
+# Write a machine-readable report
+pvanalyze phases rpc.nettrace --process-role driver --queues --format json \
+  --output rpc-phases.json
+
+# Inspect one exact probe
+pvanalyze phases rpc.nettrace \
+  --trace-id 4bf92f3577b34da6a3ce929d0e0e4736 --timeline --queues
+```
+
+Filters include `--pid`, `--process`, `--process-role` (the origin process),
+`--origin-silo port:generation`, `--trace-id`, `--correlation-id`, `--from`,
+`--to`, and `--measurement-window`. `--successful-only` defaults to true.
+Use `--include-incomplete` and `--min-completeness` to control damaged or
+window-truncated samples. `--queue <name-or-kind>` restricts queue output.
+Independent traces from separate processes cannot be combined without clock
+synchronization.
 
 ### `datas <trace-file>`
 

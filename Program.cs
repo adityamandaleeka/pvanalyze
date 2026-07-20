@@ -22,6 +22,7 @@ class Program
             TimelineCommand.Create(),
             SnapshotCommand.Create(),
             DatasCommand.Create(),
+            LatencyCommand.Create(),
             CleanCommand.Create(),
         };
 

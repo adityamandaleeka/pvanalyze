@@ -52,6 +52,22 @@ public static class InfoCommand
             Console.WriteLine($"Lost Events:     {traceLog.EventsLost:N0}");
             Console.WriteLine($"Pointer Size:    {traceLog.PointerSize * 8}-bit");
             Console.WriteLine($"CPU Count:       {traceLog.NumberOfProcessors}");
+
+            long rpcPhaseEventCount = 0;
+            foreach (var traceEvent in traceLog.Events)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (RpcPhaseProjector.IsRpcPhaseEvent(traceEvent))
+                {
+                    rpcPhaseEventCount++;
+                }
+            }
+
+            if (rpcPhaseEventCount > 0)
+            {
+                Console.WriteLine($"RPC Phase Events:{rpcPhaseEventCount,15:N0}");
+            }
+
             Console.WriteLine();
 
             Console.WriteLine("=== Processes ===");

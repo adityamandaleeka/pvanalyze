@@ -5,7 +5,7 @@ using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze;
 
-public static class TraceAnalyzer
+public static partial class TraceAnalyzer
 {
     public static GcStatsResponse GetGcStats(Etlx.TraceLog traceLog, string? processFilter,
         bool timeline, int? longest, double? fromMs, double? toMs)
