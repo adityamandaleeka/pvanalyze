@@ -15,6 +15,7 @@ class Program
             GcStatsCommand.Create(),
             JitStatsCommand.Create(),
             CpuStacksCommand.Create(),
+            PmcStatsCommand.Create(),
             EventsCommand.Create(),
             ExceptionsCommand.Create(),
             CallTreeCommand.Create(),

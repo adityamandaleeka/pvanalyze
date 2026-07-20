@@ -58,6 +58,10 @@ public static class CpuStacksCommand
         {
             Description = "Sort by inclusive time instead of exclusive"
         };
+        var pidOption = new Option<int?>("--pid")
+        {
+            Description = "Filter CPU samples by process ID"
+        };
 
         var command = new Command("cpustacks", "Analyze CPU stacks from a trace")
         {
@@ -68,7 +72,8 @@ public static class CpuStacksCommand
             groupByOption,
             fromOption,
             toOption,
-            inclusiveOption
+            inclusiveOption,
+            pidOption
         };
 
         command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
@@ -81,13 +86,25 @@ public static class CpuStacksCommand
             var fromMs = parseResult.GetValue(fromOption)!;
             var toMs = parseResult.GetValue(toOption)!;
             var inclusive = parseResult.GetValue(inclusiveOption)!;
-            await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, cancellationToken).ConfigureAwait(false);
+            var pid = parseResult.GetValue(pidOption)!;
+            await Execute(
+                traceFile,
+                format,
+                top,
+                outputFile,
+                groupBy,
+                fromMs,
+                toMs,
+                inclusive,
+                pid,
+                cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
     private static async Task Execute(FileInfo traceFile, StackOutputFormat format, int top, FileInfo? outputFile,
-        GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive, CancellationToken cancellationToken)
+        GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive,
+        int? processId, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -114,6 +131,11 @@ public static class CpuStacksCommand
             else
             {
                 events = traceLog.Events;
+            }
+
+            if (processId.HasValue)
+            {
+                events = events.Filter(evt => evt.ProcessID == processId.Value);
             }
             
             // Create stack source from events
