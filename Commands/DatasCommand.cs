@@ -15,7 +15,7 @@ public static class DatasCommand
     {
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace or .etl file to analyze"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
         var formatOption = new Option<OutputFormat>("--format")
         {

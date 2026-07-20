@@ -22,7 +22,7 @@ public static class TimelineCommand
     {
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace file to analyze"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
         var lanesOption = new Option<string>("--lanes")
         {

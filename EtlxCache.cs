@@ -1,12 +1,12 @@
 using Microsoft.Diagnostics.Tracing.Etlx;
 using System.Diagnostics;
+using System.IO.Compression;
 
 namespace PVAnalyze;
 
 /// <summary>
-/// Caches the .nettrace → .etlx conversion so repeated commands on the same trace
-/// don't re-parse the file. The .etlx is kept alongside the .nettrace and reused
-/// if it's newer than the source.
+/// Caches trace-to-ETLX conversion so repeated commands on the same trace don't
+/// re-parse the file. Existing ETLX files are opened directly.
 /// </summary>
 public static class EtlxCache
 {
@@ -14,26 +14,39 @@ public static class EtlxCache
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(30);
     private const int LockRetryDelayMs = 50;
 
-    public static async Task<string> GetOrCreateEtlxAsync(string nettraceFilePath, CancellationToken cancellationToken = default)
+    public static async Task<string> GetOrCreateEtlxAsync(string traceFilePath, CancellationToken cancellationToken = default)
     {
-        string etlxPath = nettraceFilePath + CacheSuffix;
+        if (Path.GetExtension(traceFilePath).Equals(".etlx", StringComparison.OrdinalIgnoreCase))
+            return traceFilePath;
+
+        string etlxPath = traceFilePath + CacheSuffix;
         string lockPath = etlxPath + ".lock";
 
-        if (IsFreshCache(nettraceFilePath, etlxPath))
+        if (IsFreshCache(traceFilePath, etlxPath))
             return etlxPath;
 
         await using var lockStream = await AcquireLockAsync(lockPath, cancellationToken).ConfigureAwait(false);
-        if (IsFreshCache(nettraceFilePath, etlxPath))
+        if (IsFreshCache(traceFilePath, etlxPath))
             return etlxPath;
 
         string tempPath = $"{etlxPath}.tmp.{Environment.ProcessId}.{Guid.NewGuid():N}";
+        string? extractedEtlPath = null;
         try
         {
-            // CreateFromEventPipeDataFile doesn't accept a cancellation token, so once it starts
-            // it runs to completion. Check before we begin so a late cancel still bails out cheaply;
-            // the Task.Run token only covers the queued-but-not-started window.
+            string conversionInputPath = traceFilePath;
+            if (IsPerfViewArchive(traceFilePath))
+            {
+                extractedEtlPath = tempPath + ".etl";
+                await ExtractEtlAsync(traceFilePath, extractedEtlPath, cancellationToken).ConfigureAwait(false);
+                conversionInputPath = extractedEtlPath;
+            }
+
+            // TraceEvent conversion APIs don't accept cancellation tokens. The Task.Run token
+            // therefore only covers the queued-but-not-started window.
             cancellationToken.ThrowIfCancellationRequested();
-            await Task.Run(() => TraceLog.CreateFromEventPipeDataFile(nettraceFilePath, tempPath), cancellationToken).ConfigureAwait(false);
+            await Task.Run(
+                () => ConvertToEtlx(conversionInputPath, traceFilePath, tempPath),
+                cancellationToken).ConfigureAwait(false);
             try
             {
                 File.Move(tempPath, etlxPath, overwrite: true);
@@ -41,7 +54,7 @@ public static class EtlxCache
             }
             catch (IOException publishEx)
             {
-                if (!IsFreshCache(nettraceFilePath, etlxPath))
+                if (!IsFreshCache(traceFilePath, etlxPath))
                     throw new IOException($"Failed to publish ETLX cache '{etlxPath}'.", publishEx);
 
                 // Another writer published a fresh cache first. We've already succeeded, so clean
@@ -68,16 +81,66 @@ public static class EtlxCache
             }
             throw;
         }
+        finally
+        {
+            if (extractedEtlPath != null)
+                TryDeleteTemp(extractedEtlPath);
+        }
     }
 
-    private static bool IsFreshCache(string nettraceFilePath, string etlxPath)
+    private static void ConvertToEtlx(string conversionInputPath, string originalTracePath, string etlxPath)
+    {
+        if (IsEtl(conversionInputPath) || IsPerfViewArchive(originalTracePath))
+            TraceLog.CreateFromEventTraceLogFile(conversionInputPath, etlxPath);
+        else
+            TraceLog.CreateFromEventPipeDataFile(conversionInputPath, etlxPath);
+    }
+
+    private static bool IsEtl(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".etl", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".btl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPerfViewArchive(string path) =>
+        path.EndsWith(".etl.zip", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task ExtractEtlAsync(
+        string archivePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        var etlEntries = archive.Entries
+            .Where(entry => entry.Length > 0 && IsEtl(entry.FullName))
+            .ToList();
+
+        if (etlEntries.Count != 1)
+        {
+            throw new InvalidDataException(
+                $"PerfView archive '{archivePath}' must contain exactly one ETL file; found {etlEntries.Count}.");
+        }
+
+        await using var source = etlEntries[0].Open();
+        await using var destination = new FileStream(
+            destinationPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 81920,
+            useAsync: true);
+        await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool IsFreshCache(string traceFilePath, string etlxPath)
     {
         if (!File.Exists(etlxPath))
             return false;
 
-        var nettraceTime = File.GetLastWriteTimeUtc(nettraceFilePath);
+        var sourceTime = File.GetLastWriteTimeUtc(traceFilePath);
         var etlxTime = File.GetLastWriteTimeUtc(etlxPath);
-        return etlxTime >= nettraceTime;
+        return etlxTime >= sourceTime;
     }
 
     private static async Task<FileStream> AcquireLockAsync(string lockPath, CancellationToken cancellationToken)

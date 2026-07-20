@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace PVAnalyze;
 
 // Trace info
@@ -20,8 +22,12 @@ public record JitProcessStats(int ProcessId, string ProcessName, long TotalMetho
     double TotalJitCpuTimeMSec, long TotalILSize, long TotalNativeSize);
 
 // CPU stacks
-public record CpuStacksResponse(int TotalSamples, double TotalCpuTimeMs, string GroupedBy,
-    List<CpuStackEntry> Items, double TraceDurationMs, int BucketCount);
+public record CpuStacksResponse(int TotalSamples, double TotalMetricMs, string GroupedBy,
+    List<CpuStackEntry> Items, double TraceDurationMs, int BucketCount, string StackSource = "cpu")
+{
+    [JsonPropertyName("totalCpuTimeMs")]
+    public double TotalCpuTimeMs => TotalMetricMs;
+}
 public record CpuStackEntry(string Name, double ExclusiveMs, double InclusiveMs, double ExclusivePercent,
     int[]? SampleBuckets = null);
 

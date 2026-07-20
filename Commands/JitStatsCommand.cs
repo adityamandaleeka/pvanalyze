@@ -30,7 +30,7 @@ public static class JitStatsCommand
     {
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace file to analyze"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
         var formatOption = new Option<OutputFormat>("--format")
         {

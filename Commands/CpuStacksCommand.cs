@@ -25,7 +25,7 @@ public static class CpuStacksCommand
     {
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace file to analyze"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
         var formatOption = new Option<StackOutputFormat>("--format")
         {
@@ -58,8 +58,15 @@ public static class CpuStacksCommand
         {
             Description = "Sort by inclusive time instead of exclusive"
         };
+        var stackSourceOption = new Option<string>("--stack-source")
+        {
+            DefaultValueFactory = _ => "cpu",
+            Description = "Stack source: cpu, threadtime, activity, activity-cpu, or activity-threadtime"
+        };
+        stackSourceOption.AcceptOnlyFromAmong(
+            "cpu", "threadtime", "activity", "activity-cpu", "activity-threadtime");
 
-        var command = new Command("cpustacks", "Analyze CPU stacks from a trace")
+        var command = new Command("cpustacks", "Analyze CPU, thread-time, or async activity stacks")
         {
             traceFileArg,
             formatOption,
@@ -68,8 +75,10 @@ public static class CpuStacksCommand
             groupByOption,
             fromOption,
             toOption,
-            inclusiveOption
+            inclusiveOption,
+            stackSourceOption
         };
+        command.Aliases.Add("stacks");
 
         command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
         {
@@ -81,13 +90,15 @@ public static class CpuStacksCommand
             var fromMs = parseResult.GetValue(fromOption)!;
             var toMs = parseResult.GetValue(toOption)!;
             var inclusive = parseResult.GetValue(inclusiveOption)!;
-            await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, cancellationToken).ConfigureAwait(false);
+            var stackSource = StackSourceFactory.ParseKind(parseResult.GetValue(stackSourceOption)!);
+            await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, stackSource, cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
     private static async Task Execute(FileInfo traceFile, StackOutputFormat format, int top, FileInfo? outputFile,
-        GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive, CancellationToken cancellationToken)
+        GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive,
+        StackSourceKind stackSourceKind, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -101,26 +112,8 @@ public static class CpuStacksCommand
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
-            // Get events, optionally filtered by time
-            Etlx.TraceEvents events;
-            if (fromMs.HasValue || toMs.HasValue)
-            {
-                double startMs = fromMs ?? 0;
-                double endMs = toMs ?? double.MaxValue;
-                events = traceLog.Events.FilterByTime(
-                    traceLog.SessionStartTime + TimeSpan.FromMilliseconds(startMs),
-                    traceLog.SessionStartTime + TimeSpan.FromMilliseconds(endMs));
-            }
-            else
-            {
-                events = traceLog.Events;
-            }
-            
-            // Create stack source from events
-            var traceStackSource = new TraceEventStackSource(events);
-            
-            // Clone for stable access
-            var stackSource = CopyStackSource.Clone(traceStackSource);
+            var stackSource = StackSourceFactory.Create(
+                traceLog, stackSourceKind, fromMs, toMs, out stackSourceKind);
 
             switch (format)
             {
@@ -128,11 +121,11 @@ public static class CpuStacksCommand
                     await OutputSpeedscope(stackSource, traceFile, outputFile, cancellationToken).ConfigureAwait(false);
                     break;
                 case StackOutputFormat.Json:
-                    await OutputJson(stackSource, top, outputFile, groupBy, sortByInclusive, cancellationToken).ConfigureAwait(false);
+                    await OutputJson(stackSource, top, outputFile, groupBy, sortByInclusive, stackSourceKind, cancellationToken).ConfigureAwait(false);
                     break;
                 case StackOutputFormat.Text:
                 default:
-                    OutputText(stackSource, top, outputFile, groupBy, sortByInclusive);
+                    OutputText(stackSource, top, outputFile, groupBy, sortByInclusive, stackSourceKind);
                     break;
             }
 
@@ -149,7 +142,8 @@ public static class CpuStacksCommand
         }
     }
 
-    private static void OutputText(StackSource stackSource, int top, FileInfo? outputFile, GroupBy groupBy, bool sortByInclusive)
+    private static void OutputText(StackSource stackSource, int top, FileInfo? outputFile, GroupBy groupBy,
+        bool sortByInclusive, StackSourceKind stackSourceKind)
     {
         var writer = outputFile != null ? new StreamWriter(outputFile.FullName) : Console.Out;
         
@@ -158,30 +152,25 @@ public static class CpuStacksCommand
             var callTree = new CallTree(ScalingPolicyKind.TimeMetric);
             callTree.StackSource = stackSource;
 
-            writer.WriteLine("=== CPU Stacks Analysis ===");
+            string sourceName = StackSourceFactory.GetDisplayName(stackSourceKind);
+            writer.WriteLine($"=== {sourceName} Stacks Analysis ===");
             writer.WriteLine();
             writer.WriteLine($"Total Samples: {callTree.Root.InclusiveCount:N0}");
-            writer.WriteLine($"Total CPU Time: {callTree.Root.InclusiveMetric:F1} ms");
+            writer.WriteLine($"Total Metric: {callTree.Root.InclusiveMetric:F1} ms");
             writer.WriteLine();
 
-            // Collect all methods
-            var methods = new List<(string Name, float Exclusive, float Inclusive)>();
-            CollectMethods(callTree.Root, methods);
+            var methods = AggregateMethods(stackSource, groupBy);
 
             if (methods.Count == 0)
             {
-                writer.WriteLine("No CPU samples found in trace.");
-                writer.WriteLine("Ensure the trace was collected with CPU sampling enabled.");
+                writer.WriteLine($"No {sourceName.ToLowerInvariant()} samples found in trace.");
                 return;
             }
 
-            // Group if needed
-            var grouped = GroupMethods(methods, groupBy);
-
             // Sort and take top N
             var sorted = sortByInclusive
-                ? grouped.OrderByDescending(m => m.Inclusive).Take(top).ToList()
-                : grouped.OrderByDescending(m => m.Exclusive).Take(top).ToList();
+                ? methods.OrderByDescending(m => m.Inclusive).Take(top).ToList()
+                : methods.OrderByDescending(m => m.Exclusive).Take(top).ToList();
 
             var groupLabel = groupBy switch
             {
@@ -191,15 +180,17 @@ public static class CpuStacksCommand
             };
 
             var sortLabel = sortByInclusive ? "Inclusive" : "Exclusive";
-            writer.WriteLine($"Top {Math.Min(top, sorted.Count)} {groupLabel} by {sortLabel} CPU Time:");
+            var percentLabel = sortByInclusive ? "Inc %" : "Exc %";
+            writer.WriteLine($"Top {Math.Min(top, sorted.Count)} {groupLabel} by {sortLabel} Time:");
             writer.WriteLine(new string('-', 90));
-            writer.WriteLine($"{"Exclusive",12} {"Inclusive",12} {"%",6}  {groupBy}");
+            writer.WriteLine($"{"Exclusive",12} {"Inclusive",12} {percentLabel,6}  {groupBy}");
             writer.WriteLine(new string('-', 90));
 
             var totalTime = callTree.Root.InclusiveMetric;
             foreach (var item in sorted)
             {
-                var pct = totalTime > 0 ? (item.Exclusive / totalTime) * 100 : 0;
+                var metric = sortByInclusive ? item.Inclusive : item.Exclusive;
+                var pct = totalTime > 0 ? (metric / totalTime) * 100 : 0;
                 var name = item.Name.Length > 55 ? item.Name.Substring(0, 52) + "..." : item.Name;
                 writer.WriteLine($"{item.Exclusive,12:F1} {item.Inclusive,12:F1} {pct,5:F1}%  {name}");
             }
@@ -211,31 +202,47 @@ public static class CpuStacksCommand
         }
     }
 
-    private static List<(string Name, float Exclusive, float Inclusive)> GroupMethods(
-        List<(string Name, float Exclusive, float Inclusive)> methods, GroupBy groupBy)
+    private static List<(string Name, float Exclusive, float Inclusive)> AggregateMethods(
+        StackSource stackSource,
+        GroupBy groupBy)
     {
-        if (groupBy == GroupBy.Method)
-            return methods;
-
-        var grouped = new Dictionary<string, (float Exclusive, float Inclusive)>();
-
-        foreach (var method in methods)
+        var metrics = new Dictionary<string, (float Exclusive, float Inclusive)>();
+        stackSource.ForEach(sample =>
         {
-            var key = groupBy switch
+            var seen = new HashSet<string>();
+            bool isLeaf = true;
+            var stackIndex = sample.StackIndex;
+            while (stackIndex != StackSourceCallStackIndex.Invalid)
             {
-                GroupBy.Module => ExtractModule(method.Name),
-                GroupBy.Namespace => ExtractNamespace(method.Name),
-                _ => method.Name
-            };
+                var frameIndex = stackSource.GetFrameIndex(stackIndex);
+                string frameName = stackSource.GetFrameName(frameIndex, false);
+                stackIndex = stackSource.GetCallerIndex(stackIndex);
 
-            if (!grouped.TryGetValue(key, out var current))
-            {
-                current = (0, 0);
+                if (IsContainerFrame(frameName))
+                    continue;
+
+                string key = groupBy switch
+                {
+                    GroupBy.Module => ExtractModule(frameName),
+                    GroupBy.Namespace => ExtractNamespace(frameName),
+                    _ => frameName
+                };
+
+                metrics.TryGetValue(key, out var current);
+                if (isLeaf && !IsMetricFrame(frameName))
+                {
+                    current.Exclusive += sample.Metric;
+                    isLeaf = false;
+                }
+
+                if (seen.Add(key))
+                    current.Inclusive += sample.Metric;
+
+                metrics[key] = current;
             }
-            grouped[key] = (current.Exclusive + method.Exclusive, current.Inclusive + method.Inclusive);
-        }
+        });
 
-        return grouped.Select(kvp => (kvp.Key, kvp.Value.Exclusive, kvp.Value.Inclusive)).ToList();
+        return metrics.Select(kvp => (kvp.Key, kvp.Value.Exclusive, kvp.Value.Inclusive)).ToList();
     }
 
     private static string ExtractModule(string methodName)
@@ -293,32 +300,33 @@ public static class CpuStacksCommand
         return string.Join(".", parts.Take(parts.Length - 2));
     }
 
-    private static void CollectMethods(CallTreeNode node, List<(string Name, float Exclusive, float Inclusive)> methods)
-    {
-        if (node.ExclusiveMetric > 0)
-        {
-            methods.Add((node.Name, node.ExclusiveMetric, node.InclusiveMetric));
-        }
+    private static bool IsContainerFrame(string name) =>
+        name == "ROOT"
+        || name == "Threads"
+        || name.StartsWith("Process", StringComparison.Ordinal)
+        || name.StartsWith("Thread (", StringComparison.Ordinal);
 
-        foreach (var child in node.Callees ?? Enumerable.Empty<CallTreeNode>())
-        {
-            CollectMethods(child, methods);
-        }
-    }
+    private static bool IsMetricFrame(string name) =>
+        name.StartsWith("CPU_TIME", StringComparison.Ordinal)
+        || name.StartsWith("BLOCKED_TIME", StringComparison.Ordinal)
+        || name.StartsWith("AWAIT_TIME", StringComparison.Ordinal)
+        || name.StartsWith("UNKNOWN_ASYNC", StringComparison.Ordinal)
+        || name.StartsWith("DISK_TIME", StringComparison.Ordinal)
+        || name.StartsWith("HARD_FAULT", StringComparison.Ordinal)
+        || name.StartsWith("READIED_TIME", StringComparison.Ordinal)
+        || name.StartsWith("NETWORK_TIME", StringComparison.Ordinal);
 
-    private static async Task OutputJson(StackSource stackSource, int top, FileInfo? outputFile, GroupBy groupBy, bool sortByInclusive, CancellationToken cancellationToken)
+    private static async Task OutputJson(StackSource stackSource, int top, FileInfo? outputFile, GroupBy groupBy,
+        bool sortByInclusive, StackSourceKind stackSourceKind, CancellationToken cancellationToken)
     {
         var callTree = new CallTree(ScalingPolicyKind.TimeMetric);
         callTree.StackSource = stackSource;
 
-        var methods = new List<(string Name, float Exclusive, float Inclusive)>();
-        CollectMethods(callTree.Root, methods);
-
-        var grouped = GroupMethods(methods, groupBy);
+        var methods = AggregateMethods(stackSource, groupBy);
 
         var sorted = sortByInclusive
-            ? grouped.OrderByDescending(m => m.Inclusive).Take(top).ToList()
-            : grouped.OrderByDescending(m => m.Exclusive).Take(top).ToList();
+            ? methods.OrderByDescending(m => m.Inclusive).Take(top).ToList()
+            : methods.OrderByDescending(m => m.Exclusive).Take(top).ToList();
 
         var totalTime = callTree.Root.InclusiveMetric;
         var items = sorted.Select(m => new CpuStackEntry(
@@ -333,7 +341,8 @@ public static class CpuStacksCommand
             groupBy.ToString().ToLower(),
             items,
             0,
-            0);
+            0,
+            StackSourceFactory.GetName(stackSourceKind));
 
         if (outputFile != null)
             await JsonOutput.WriteToFileAsync(result, outputFile.FullName, CpuStacksJsonContext.Default.CpuStacksResponse, cancellationToken).ConfigureAwait(false);

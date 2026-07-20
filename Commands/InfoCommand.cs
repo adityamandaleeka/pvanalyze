@@ -11,7 +11,7 @@ public static class InfoCommand
     {
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace file to analyze"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
 
         var command = new Command("info", "Display basic trace information")
@@ -54,6 +54,30 @@ public static class InfoCommand
             Console.WriteLine($"CPU Count:       {traceLog.NumberOfProcessors}");
             Console.WriteLine();
 
+            var capabilities = TraceCapabilityDetector.Detect(traceLog);
+            Console.WriteLine("=== Available Analyses ===");
+            PrintCapability("CPU stacks", capabilities.SupportsCpuStacks,
+                $"{capabilities.CpuSampleCount:N0} samples", "cpustacks --stack-source cpu");
+            PrintCapability("Thread time", capabilities.SupportsThreadTime,
+                $"{capabilities.ContextSwitchCount:N0} context switches", "stacks --stack-source threadtime");
+            PrintCapability("CPU activities", capabilities.SupportsCpuActivityStacks,
+                $"{capabilities.CpuSampleCount:N0} CPU, {capabilities.StartStopEventCount:N0} Start/Stop",
+                "stacks --stack-source activity-cpu");
+            PrintCapability("Full activities", capabilities.SupportsThreadTimeActivityStacks,
+                $"{capabilities.ContextSwitchCount:N0} ctx, {capabilities.StartStopEventCount:N0} Start/Stop",
+                "stacks --stack-source activity-threadtime");
+            PrintCapability("Hardware counters", capabilities.HardwareCounterSampleCount > 0,
+                $"{capabilities.HardwareCounterSampleCount:N0} PMC samples", "events --type PMCSample");
+            PrintCapability("GC", capabilities.GcEventCount > 0,
+                $"{capabilities.GcEventCount:N0} GC lifecycle events", "gcstats");
+            PrintCapability("Allocations", capabilities.AllocationEventCount > 0,
+                $"{capabilities.AllocationEventCount:N0} allocation events", "alloc");
+            PrintCapability("Exceptions", capabilities.ExceptionEventCount > 0,
+                $"{capabilities.ExceptionEventCount:N0} exception events", "exceptions");
+            PrintCapability("JIT", capabilities.JitEventCount > 0,
+                $"{capabilities.JitEventCount:N0} JIT events", "jitstats");
+            Console.WriteLine();
+
             Console.WriteLine("=== Processes ===");
             foreach (var process in traceLog.Processes.OrderByDescending(p => p.CPUMSec))
             {
@@ -74,5 +98,11 @@ public static class InfoCommand
         {
             Console.Error.WriteLine($"Error analyzing trace: {ex.Message}");
         }
+    }
+
+    private static void PrintCapability(string analysis, bool available, string evidence, string command)
+    {
+        string status = available ? "yes" : "no";
+        Console.WriteLine($"  {analysis,-18} {status,-3}  {evidence,-28} {command}");
     }
 }

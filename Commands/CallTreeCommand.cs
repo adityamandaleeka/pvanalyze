@@ -18,7 +18,7 @@ public static class CallTreeCommand
     {
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace file to analyze"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
         var formatOption = new Option<OutputFormat>("--format")
         {
@@ -51,8 +51,15 @@ public static class CallTreeCommand
             DefaultValueFactory = _ => 1.0,
             Description = "Hide nodes below this inclusive % threshold"
         };
+        var stackSourceOption = new Option<string>("--stack-source")
+        {
+            DefaultValueFactory = _ => "cpu",
+            Description = "Stack source: cpu, threadtime, activity, activity-cpu, or activity-threadtime"
+        };
+        stackSourceOption.AcceptOnlyFromAmong(
+            "cpu", "threadtime", "activity", "activity-cpu", "activity-threadtime");
 
-        var command = new Command("calltree", "CPU call tree analysis with hot path detection")
+        var command = new Command("calltree", "Call tree analysis with hot path detection")
         {
             traceFileArg,
             formatOption,
@@ -61,7 +68,8 @@ public static class CallTreeCommand
             callerCalleeOption,
             fromOption,
             toOption,
-            minPercentOption
+            minPercentOption,
+            stackSourceOption
         };
 
         command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
@@ -74,13 +82,15 @@ public static class CallTreeCommand
             var fromMs = parseResult.GetValue(fromOption)!;
             var toMs = parseResult.GetValue(toOption)!;
             var minPercent = parseResult.GetValue(minPercentOption)!;
-            await Execute(traceFile, format, depth, hotPath, callerCallee, fromMs, toMs, minPercent, cancellationToken).ConfigureAwait(false);
+            var stackSource = StackSourceFactory.ParseKind(parseResult.GetValue(stackSourceOption)!);
+            await Execute(traceFile, format, depth, hotPath, callerCallee, fromMs, toMs, minPercent, stackSource, cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
     private static async Task Execute(FileInfo traceFile, OutputFormat format, int depth,
-        bool hotPath, string? callerCallee, double? fromMs, double? toMs, double minPercent, CancellationToken cancellationToken)
+        bool hotPath, string? callerCallee, double? fromMs, double? toMs, double minPercent,
+        StackSourceKind stackSourceKind, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -93,23 +103,8 @@ public static class CallTreeCommand
             string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
-            // Build stack source with optional time filter
-            Etlx.TraceEvents events;
-            if (fromMs.HasValue || toMs.HasValue)
-            {
-                double startMs = fromMs ?? 0;
-                double endMs = toMs ?? double.MaxValue;
-                events = traceLog.Events.FilterByTime(
-                    traceLog.SessionStartTime + TimeSpan.FromMilliseconds(startMs),
-                    traceLog.SessionStartTime + TimeSpan.FromMilliseconds(endMs));
-            }
-            else
-            {
-                events = traceLog.Events;
-            }
-
-            var traceStackSource = new TraceEventStackSource(events);
-            var stackSource = CopyStackSource.Clone(traceStackSource);
+            var stackSource = StackSourceFactory.Create(
+                traceLog, stackSourceKind, fromMs, toMs, out stackSourceKind);
 
             var callTree = new CallTree(ScalingPolicyKind.TimeMetric);
             callTree.StackSource = stackSource;
@@ -120,11 +115,11 @@ public static class CallTreeCommand
             }
             else if (hotPath)
             {
-                await OutputHotPath(callTree, format, cancellationToken).ConfigureAwait(false);
+                await OutputHotPath(callTree, format, stackSourceKind, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                await OutputCallTree(callTree, depth, format, minPercent, cancellationToken).ConfigureAwait(false);
+                await OutputCallTree(callTree, depth, format, minPercent, stackSourceKind, cancellationToken).ConfigureAwait(false);
             }
 
         }
@@ -138,7 +133,8 @@ public static class CallTreeCommand
         }
     }
 
-    private static async Task OutputCallTree(CallTree callTree, int maxDepth, OutputFormat format, double minPercent, CancellationToken cancellationToken)
+    private static async Task OutputCallTree(CallTree callTree, int maxDepth, OutputFormat format,
+        double minPercent, StackSourceKind stackSourceKind, CancellationToken cancellationToken)
     {
         var result = TraceAnalyzer.GetCallTree(callTree, maxDepth);
         var unfilteredCount = CountNodes(result.Nodes);
@@ -154,7 +150,7 @@ public static class CallTreeCommand
         }
         else
         {
-            Console.WriteLine("=== CPU Call Tree ===");
+            Console.WriteLine($"=== {StackSourceFactory.GetDisplayName(stackSourceKind)} Call Tree ===");
             Console.WriteLine($"Total: {result.TotalMetricMs:F1} ms ({result.TotalSamples:N0} samples)");
             if (minPercent > 0)
                 Console.WriteLine($"Hiding nodes below {minPercent:G}% inclusive ({filteredCount}/{unfilteredCount} nodes shown). Adjust with --min-percent <value> or use --min-percent 0 to show all.");
@@ -179,7 +175,8 @@ public static class CallTreeCommand
         }
     }
 
-    private static async Task OutputHotPath(CallTree callTree, OutputFormat format, CancellationToken cancellationToken)
+    private static async Task OutputHotPath(CallTree callTree, OutputFormat format,
+        StackSourceKind stackSourceKind, CancellationToken cancellationToken)
     {
         // Start from root (path = [0] = first real child)
         var result = TraceAnalyzer.GetHotPath(callTree, new[] { 0 });
@@ -190,7 +187,7 @@ public static class CallTreeCommand
         }
         else
         {
-            Console.WriteLine("=== Hot Path (CPU) ===");
+            Console.WriteLine($"=== Hot Path ({StackSourceFactory.GetDisplayName(stackSourceKind)}) ===");
             Console.WriteLine($"Total: {result.TotalMetricMs:F1} ms");
             Console.WriteLine("Follows the dominant call chain (child >= 80% of parent's inclusive time)");
             Console.WriteLine();

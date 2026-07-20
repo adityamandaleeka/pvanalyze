@@ -204,19 +204,7 @@ public static class TraceAnalyzer
         double traceDurationMs = endMs - startMs;
         int bucketCount = Math.Min(100, Math.Max(20, (int)(traceDurationMs / 100)));
 
-        // Walk events directly to get per-sample timing info
-        Etlx.TraceEvents events;
-        if (fromMs.HasValue || toMs.HasValue)
-        {
-            events = traceLog.Events.FilterByTime(
-                traceLog.SessionStartTime + TimeSpan.FromMilliseconds(startMs),
-                traceLog.SessionStartTime + TimeSpan.FromMilliseconds(endMs));
-        }
-        else
-        {
-            events = traceLog.Events;
-        }
-
+        var events = GetCpuSampleEvents(traceLog, fromMs, toMs);
         var traceStackSource = new TraceEventStackSource(events);
         var stackSource = CopyStackSource.Clone(traceStackSource);
 
@@ -954,9 +942,7 @@ public static class TraceAnalyzer
         for (int i = 0; i < bucketCount; i++)
             topMethods[i] = new Dictionary<string, int>();
 
-        var events = traceLog.Events.FilterByTime(
-            traceLog.SessionStartTime + TimeSpan.FromMilliseconds(startMs),
-            traceLog.SessionStartTime + TimeSpan.FromMilliseconds(endMs));
+        var events = GetCpuSampleEvents(traceLog, startMs, endMs);
         var traceStackSource = new TraceEventStackSource(events);
         var stackSource = CopyStackSource.Clone(traceStackSource);
 
@@ -988,6 +974,27 @@ public static class TraceAnalyzer
             result[i] = new CpuBucket(sampleCounts[i], top);
         }
         return result.Cast<object>().ToArray();
+    }
+
+    internal static Etlx.TraceEvents GetCpuSampleEvents(
+        Etlx.TraceLog traceLog,
+        double? fromMs,
+        double? toMs)
+    {
+        Etlx.TraceEvents events;
+        if (fromMs.HasValue || toMs.HasValue)
+        {
+            events = traceLog.Events.FilterByTime(
+                traceLog.SessionStartTime + TimeSpan.FromMilliseconds(fromMs ?? 0),
+                traceLog.SessionStartTime + TimeSpan.FromMilliseconds(
+                    toMs ?? traceLog.SessionDuration.TotalMilliseconds));
+        }
+        else
+        {
+            events = traceLog.Events;
+        }
+
+        return events.Filter(TraceCapabilityDetector.IsCpuSample);
     }
 
     private static object[] BuildExceptionLane(Etlx.TraceLog traceLog, double startMs, double endMs,

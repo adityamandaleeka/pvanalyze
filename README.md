@@ -1,12 +1,15 @@
 # pvanalyze
 
-A cross-platform command-line tool for analyzing .NET performance traces (`.nettrace` files).
+A cross-platform command-line tool for analyzing .NET performance traces from
+`dotnet-trace` (`.nettrace`) and PerfView (`.etl`, `.etl.zip`, and `.etlx`).
 
 > Point your coding agent at this repo and let it work. There's intentionally no `SKILL.md` or `AGENTS.md` — `--help` and this README are enough context for today's frontier models, based on my experience.
 
 ## Overview
 
-`pvanalyze` is a companion tool to PerfView that runs on **Mac, Linux, and Windows**. It provides command-line access to trace analysis capabilities, making it ideal for:
+`pvanalyze` runs on **macOS, Linux, and Windows**. Use PerfView to collect traces
+on Windows and `dotnet-trace` to collect them on macOS and Linux. Analysis with
+`pvanalyze` is cross-platform. The CLI is ideal for:
 
 - Automation and scripting
 - CI/CD pipelines
@@ -35,7 +38,38 @@ dotnet publish -c Release -r osx-arm64 --self-contained
 
 ### Collect a Trace
 
-Use `dotnet-trace` to collect traces on any platform:
+#### Windows: PerfView
+
+PerfView is the recommended collector on Windows. It can capture ETW kernel and
+runtime events, native stacks, context switches, and hardware counters that are
+not available in a standard EventPipe trace.
+
+Choose a capture profile based on the question being investigated. Collecting
+more events has overhead, so do not use `/ThreadTime`, hardware counters, or
+additional providers unless that data is needed.
+
+| Investigation | PerfView capture | pvanalyze analysis |
+|---|---|---|
+| CPU hotspots | `PerfView collect trace.etl.zip` | `cpustacks --stack-source cpu` |
+| Blocking and off-CPU time | `PerfView /ThreadTime collect trace.etl.zip` | `stacks --stack-source threadtime` |
+| CPU used by async activities | `PerfView /Providers:*MyProvider collect trace.etl.zip` | `stacks --stack-source activity-cpu --inclusive` |
+| End-to-end async activity time | `PerfView /ThreadTime /Providers:*MyProvider collect trace.etl.zip` | `stacks --stack-source activity-threadtime --inclusive` |
+| Hardware counter samples | `PerfView /CpuCounters:Counter:Interval collect trace.etl.zip` | `events --type PMCSample` |
+| GC, allocation, JIT, exceptions | Default PerfView CLR providers, or targeted provider keywords | `gcstats`, `alloc`, `jitstats`, `exceptions` |
+| Arbitrary provider events | `/Providers:<provider-spec>` | `events` |
+
+Use `PerfView listCpuCounters` to discover hardware counters and valid sampling
+intervals for the current machine.
+
+```powershell
+# Stop collection by pressing S in the PerfView console.
+PerfView /AcceptEula /NoGui collect trace.etl.zip
+PerfView /AcceptEula /NoGui /ThreadTime collect threadtime.etl.zip
+```
+
+#### macOS and Linux: dotnet-trace
+
+Use `dotnet-trace` to collect EventPipe traces:
 
 ```bash
 # Install dotnet-trace (one-time)
@@ -48,11 +82,22 @@ dotnet-trace collect --process-id <PID> --output trace.nettrace
 dotnet-trace collect -- dotnet run
 ```
 
+All analysis commands accept `.nettrace`, `.etl`, `.etl.zip`, and `.etlx`
+inputs. Raw and zipped traces are converted to an ETLX cache beside the source
+file; use `pvanalyze clean <trace-file>` to remove that cache.
+
+Run `pvanalyze info <trace-file>` first. In addition to trace metadata and
+processes, it reports whether the captured events support CPU stacks,
+thread-time, async activities, hardware-counter inspection, GC, allocations,
+exceptions, and JIT analysis. `stacks` and `calltree` reject stack sources whose
+required events are absent instead of returning incomplete results.
+
 ### Analyze with pvanalyze
 
 ```bash
 # Show trace information
 pvanalyze info trace.nettrace
+pvanalyze info trace.etl.zip
 
 # GC statistics (summary)
 pvanalyze gcstats trace.nettrace
@@ -78,7 +123,18 @@ pvanalyze jitstats trace.nettrace --format json
 
 # CPU stacks analysis
 pvanalyze cpustacks trace.nettrace --top 20
+pvanalyze cpustacks trace.etl.zip --top 20
 pvanalyze cpustacks trace.nettrace --format json
+
+# Thread-time stacks include CPU and blocked time from PerfView context switches
+pvanalyze stacks trace.etl.zip --stack-source threadtime --inclusive
+
+# Attribute sampled CPU to EventSource Start/Stop activities
+pvanalyze stacks trace.etl.zip --stack-source activity-cpu --inclusive
+
+# Include CPU, blocked, runnable, task, and await time under each activity
+pvanalyze stacks trace.etl.zip --stack-source activity-threadtime --inclusive
+pvanalyze calltree trace.etl.zip --stack-source activity-threadtime --hot-path
 
 # Export to SpeedScope for flame graph visualization
 pvanalyze cpustacks trace.nettrace --format speedscope
@@ -90,6 +146,9 @@ pvanalyze events trace.nettrace --list
 # Filter events by type or provider
 pvanalyze events trace.nettrace --type GCStart
 pvanalyze events trace.nettrace --provider DotNETRuntime --limit 50
+
+# Inspect hardware-counter samples from PerfView /CpuCounters collection
+pvanalyze events trace.etl.zip --type PMCSample
 
 # Filter by PID, TID, or payload content
 pvanalyze events trace.nettrace --pid 1234
@@ -114,7 +173,9 @@ pvanalyze calltree trace.nettrace --hot-path --format json
 ### `info <trace-file>`
 
 Display basic trace metadata:
-- Duration, event count, processes
+- Duration, event count, and processes
+- Available analyses inferred from captured events
+- Event counts supporting each available analysis
 
 ### `gcstats <trace-file>`
 
@@ -135,10 +196,12 @@ Options:
 
 Analyze JIT compilation.
 
-### `cpustacks <trace-file>`
+### `cpustacks|stacks <trace-file>`
 
-Analyze CPU profiling stacks:
-- Top methods by exclusive CPU time
+Analyze CPU, thread-time, or async activity stacks:
+- Top methods by exclusive or inclusive metric
+- Thread-time analysis including blocked time from ETW context switches
+- Start/Stop activity grouping with task and await-time attribution
 - Group by module or namespace
 - SpeedScope export for flame graphs
 
@@ -146,6 +209,13 @@ Options:
 - `--format text|json|speedscope`
 - `--top <N>` - Number of entries to show
 - `--group-by method|module|namespace` - Aggregation level
+- `--stack-source cpu|threadtime|activity-cpu|activity-threadtime|activity`
+  - `cpu`: sampled on-CPU stacks
+  - `threadtime`: CPU plus blocked and runnable time; requires context switches
+  - `activity-cpu`: sampled CPU grouped under Start/Stop activities
+  - `activity-threadtime`: full thread time grouped under Start/Stop activities
+  - `activity`: automatically chooses `activity-threadtime` when context switches
+    are present, otherwise `activity-cpu`
 - `--inclusive` - Sort by inclusive time instead of exclusive
 - `--from <ms>` / `--to <ms>` - Time range filter
 - `--output <file>` - Output file
@@ -163,7 +233,24 @@ pvanalyze cpustacks trace.nettrace --group-by namespace --inclusive
 
 # Analyze specific time window
 pvanalyze cpustacks trace.nettrace --from 1000 --to 2000 --top 10
+
+# Analyze blocked and on-CPU time from a PerfView /ThreadTime trace
+pvanalyze stacks trace.etl.zip --stack-source threadtime --inclusive
+
+# Attribute sampled CPU to async Start/Stop activities
+pvanalyze stacks trace.etl.zip --stack-source activity-cpu --inclusive
+
+# Attribute CPU, blocked, runnable, task, and await time to activities
+pvanalyze stacks trace.etl.zip --stack-source activity-threadtime --inclusive
 ```
+
+Context-switch collection is required only for off-CPU attribution:
+`threadtime` and `activity-threadtime` therefore require a PerfView trace
+collected with `/ThreadTime`. `activity-cpu` does not require context switches;
+it needs sampled-profile events plus EventSource Start/Stop events with activity
+IDs. All activity modes use TraceEvent's Start/Stop activity computer and
+preserve events before a `--from` boundary so activity state is reconstructed
+correctly before applying the requested time filter.
 
 ### `alloc <trace-file>`
 
@@ -172,7 +259,8 @@ Analyze memory allocations by type:
 - Identifies Large Object Heap (LOH) allocations
 - Group by type, namespace, or module
 
-**Note:** Requires trace collected with allocation events:
+**Note:** Requires allocation events. On Windows, collect with PerfView's CLR
+providers. On macOS or Linux, use:
 ```bash
 dotnet-trace collect --providers "Microsoft-Windows-DotNETRuntime:0x200001:5" -- dotnet run
 ```
@@ -187,10 +275,13 @@ Options:
 
 Analyze DATAS (Dynamic Adaptation To Application Sizes) tuning decisions. DATAS dynamically adjusts heap count and gen0 budget on server GC. Requires .NET 9+ with `DOTNET_GCDynamicAdaptationMode=1` and GC events collected at verbose level.
 
-**Trace collection:**
+**Trace collection on macOS or Linux:**
 ```bash
 dotnet-trace collect -p <PID> --providers "Microsoft-Windows-DotNETRuntime:0x4C14FCCBD:5"
 ```
+
+On Windows, pass the equivalent CLR provider and keywords to PerfView using
+`/Providers`.
 
 Options:
 - `--samples` - Show per-GC samples (budget, TCP, MSL wait times)
@@ -245,7 +336,7 @@ Options:
 
 ### `calltree <trace-file>`
 
-CPU call tree analysis with hot path detection:
+Call tree analysis with hot path detection:
 - Aggregated call tree with inclusive/exclusive metrics
 - Hot path follows the dominant call chain
 - Caller/callee view for any method (supports substring matching)
@@ -255,6 +346,8 @@ Options:
 - `--hot-path` - Follow the dominant call chain (child ≥80% of parent)
 - `--caller-callee <method>` - Show callers and callees for a method
 - `--format text|json` - Output format
+- `--stack-source cpu|threadtime|activity-cpu|activity-threadtime|activity`
+  - `activity` selects the richest supported activity mode automatically
 - `--from <ms>` / `--to <ms>` - Time range filter
 
 Examples:
@@ -277,7 +370,7 @@ pvanalyze calltree trace.nettrace --hot-path --from 1000 --to 2000
 
 ## JSON Output for Agents
 
-All commands support `--format json` for machine-readable output:
+Commands that expose `--format json` produce machine-readable output:
 
 ```bash
 pvanalyze gcstats trace.nettrace --format json
@@ -302,6 +395,6 @@ pvanalyze events trace.nettrace --from 500 --to 1000 --type GC
 
 ## Related Tools
 
-- [dotnet-trace](https://docs.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-trace) - Cross-platform trace collection
-- [PerfView](https://github.com/microsoft/perfview) - Full-featured Windows GUI for trace analysis
+- [PerfView](https://github.com/microsoft/perfview) - Recommended trace collector on Windows
+- [dotnet-trace](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace) - EventPipe trace collection on macOS and Linux
 - [SpeedScope](https://www.speedscope.app/) - Interactive flame graph visualization

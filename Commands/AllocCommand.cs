@@ -27,7 +27,7 @@ public static class AllocCommand
 
         var traceFileArg = new Argument<FileInfo>("trace-file")
         {
-            Description = "Path to the .nettrace file"
+            Description = "Path to a .nettrace, .etl, .etl.zip, or .etlx file"
         };
         var formatOption = new Option<string>("--format")
         {
